@@ -1,0 +1,61 @@
+{
+    "parameters": {
+        "repetition_times_list": [360.0, 540.0, 810.0, 1215.0, 1822.5, 2733.75],
+        "echo_times_list": [10.0, 20.0, 40.0, 80.0, 160.0, 320.0],
+        "t1_rlaxometry_steps": 1000,
+        "t1_rlaxometry_lr": 20.1,
+        "t2_rlaxometry_steps": 2000,
+        "t2_rlaxometry_lr": 10.1
+    },
+    "other_parameters": {
+        "acceleration": [2, 4 , 9 ,16, 25,36], 
+        "raw_dataset_dir":"/data/scratch/r098956/SRQM/FullGliomaPatientsDataset/Processed SynthMR/" ,
+        "processed_dataset_dir": "/data/scratch/r098956/SRQM/final_dataset_0.2_sigma_10_test/final_dataset_0.2_sigma_10_test/"
+    },
+    "model":{
+        "input_channels" :3 ,
+        "output_channels" :3 ,
+        "in_out_channels_COMMENT":" number of input parametric maps, The total number of input channels of the model is determined by the guide",
+
+
+        "model_type":"ResNet50",
+        "model_type_COMMENT":"3DUNET , 2DUNET ,ResidualUNet2D,ResNet50"
+    },
+
+    "downsampling_mask_size" :  0.2 ,
+    "guide_modality" : ["T1W_BRAVO","T2W"],
+    "HR_loss_modality":["T1W_BRAVO","T2W"],
+    "mask_size_deviation":  "0" ,
+
+
+    
+    "experiment" :{"experiment_id" : "exp_CSPHIREQ_trained on new data fspgr",
+    "description": "" },
+
+
+
+    "num_epochs": 10001,
+    "num_epochs_COMMENT": "",
+    "save_interval" : 10,
+    "downsampling_mask_size_COMMENT" :" CAN BE ONE OF THE FOLLWING VALUES 0.16666666666666666 , 0.2 , 0.25, 0.3333333333333333, 0.5, 0.7071067811865475 " ,
+    "batch_size": 24 ,
+    "patch_size": 512,
+    "learning_rate": 0.00001,
+    "guide_modality_COMMENT" : "guide modality is a list that can include either ['T1W'] (i.e:4 input channel),    OR      [ 'T2FLAIR' , 'T1W'  ] (i.e:5 input channel)   or      [null](i.e:3 input channel) if null, for loss computation it will try to synthesize t1w only" ,
+    "HR_loss_weight" : 1000 ,
+    "HR_loss_weight_comment" :"0.001, 0.01, 0.1, 0, 1, 10, 100, 1000",
+    "LR_t1w_loss_weight" : 1 ,
+    "LR_t2w_loss_weight" : 1,
+    "LR_loss_weight_comment" : "0.001,0.01,0.1,1,10,100,1000",
+    "mask_size_deviation_Comment": "among values 0 : perfectly matching, +0.1 means predictins will be downsampled less than input resoution , -0.1 means predictins will be downsampled less than input resoution , similarly for +- 0.2  ",
+    "HR_loss_mode": "PCL",
+    "LR_loss_mode": "MSE",
+    "load_checkpoint": 1
+
+
+
+
+    
+    
+
+}
