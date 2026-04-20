@@ -1,0 +1,763 @@
+\documentclass[journal,twoside,web]{ieeecolor}
+\usepackage{tmi}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage[table,xcdraw]{xcolor}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usepackage{multirow}
+\usepackage{tabularx, booktabs, array} % in preamble
+
+\usepackage{soul}      % for \st{} strikethrough
+\usepackage{color}     % for \textcolor
+\newcommand{\added}[1]{\textcolor{blue}{#1}}      % new text in blue
+\newcommand{\deleted}[1]{\textcolor{red}{\st{#1}}} % deleted text red + struck
+
+
+
+\usepackage{tabularx}  % in your preamble
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\markboth{\journalname, VOL. XX, NO. XX, XXXX 2020}
+{Author \MakeLowercase{\textit{et al.}}: Preparation of Papers for IEEE TRANSACTIONS ON MEDICAL IMAGING}
+\begin{document}
+\title{Self-Supervised Weighted Image Guided Quantitative MRI Super-Resolution}
+\author{
+    Alireza Samadifardheris, 
+    Dirk H.J. Poot, 
+    Florian Wiesinger, 
+    Stefan Klein, 
+    Juan A. Hernandez-Tamames
+    \thanks{This work was conducted within the "Trustworthy AI for MRI" ICAI lab within the project ROBUST, funded by the Dutch Research Council (NWO), GE Healthcare, and the Dutch Ministry of Economic Affairs and Climate Policy (EZK).}
+    \thanks{Alireza Samadifardheris, Dirk H.J. Poot, Stefan Klein, and Juan A. Hernandez-Tamames are with the Department of Radiology and Nuclear Medicine, Erasmus MC, Rotterdam, The Netherlands (e-mail: a.samadifardheris@erasmusmc.nl; d.poot@erasmusmc.nl; s.klein@erasmusmc.nl; j.hernandeztamames@erasmusmc.nl).}
+    \thanks{Florian Wiesinger is with GE Healthcare, Munich, Germany (e-mail: florian.wiesinger@gehealthcare.com).}
+    \thanks{Juan A. Hernandez-Tamames is also with the Department of Imaging Physics, TU Delft, Delft, The Netherlands.}
+}
+
+\maketitle
+
+\begin{abstract}
+High-resolution (HR) quantitative MRI (qMRI) relaxometry provides objective tissue characterization but remains clinically underutilized due to lengthy acquisition times. We propose a physics-informed, self-supervised framework for qMRI super-resolution that uses routinely acquired HR weighted MRI (wMRI) scans as guidance, thus, removing the necessity for HR qMRI ground truth during training. We formulate super-resolution as Bayesian maximum a posteriori inference, minimizing two discrepancies: (1) between HR images synthesized from super-resolved qMRI maps and acquired wMRI guides via forward signal models, and (2) between acquired LR qMRI and downsampled predictions. This physics-informed objective allows the models to learn from clinical wMRI without HR qMRI supervision. To validate the concept, we generate training data by synthesizing wMRI guides from HR qMRI using signal equations, then degrading qMRI resolution via k-space truncation. A deep neural network learns the super-resolution mapping. Ablation experiments demonstrate that T1-weighted images primarily enhance T1 maps, T2-weighted images improve T2 maps, and combined guidance optimally enhances all parameters simultaneously. Validation on independently acquired in-vivo data from a different qMRI sequence confirms cross-qMRI sequence generalizability. Models trained on synthetic data can produce super-resolved maps from a 1-minute acquisition with quality comparable to a 5-minute reference scan, leveraging the scanner-independent nature of relaxometry parameters. By decoupling training from HR qMRI requirement, our framework enables fast qMRI acquisitions enhanced via routine clinical images, offering a practical pathway for integrating quantitative relaxometry into clinical workflows with acceptable additional scan time.\added{abstract to be updated\footnote{\textcolor{blue}{Added in response to R4.1.}}}
+\end{abstract}
+
+\begin{IEEEkeywords}
+Deep Learning, Image Synthesis, Physics-Informed, Quantitative MRI, Relaxometry, Self-Supervised Learning, Super-Resolution.
+\end{IEEEkeywords}
+
+\section{Introduction}
+\label{sec:introduction}
+
+\IEEEPARstart{M}{agnetic} resonance imaging (MRI) offers both conventional contrast-weighted images (wMRI), which are widely used in clinical practice for their diagnostic value, and quantitative MRI (qMRI) techniques, such as \deleted{T1}\added{Proton Density (PD), T1} and T2 relaxometry, which provide objective tissue-specific measurements. While wMRI scans rely on subjective visual interpretation and are less reproducible, qMRI provides objective and consistent biomarkers that are less sensitive to scanner hardware or operator variability~\cite{b1,b2}.
+
+
+
+
+
+Traditionally, qMRI maps are obtained by fitting a signal model across a series of wMRI acquired with varying imaging parameters. Acquiring such a series---particularly at high resolution (HR)---is time-consuming and typically not possible in clinical settings with patients. To accelerate qMRI acquisition, deep learning (DL) techniques have emerged as powerful tools, but they differ fundamentally in their approach to the acquisition-resolution trade-off. One class of methods directly estimates qMRI parameters from undersampled k-space data. For example, Liu et al.~\cite{b3} proposed to incorporate physics-based signal models into the network architecture to estimate parameters from undersampled multi-echo wMRI. While this approach accelerates acquisition by reducing k-space sampling requirements, it faces inherent SNR limitations: acquiring sufficient signal from small voxels for HR mapping still requires longer scan times to maintain adequate signal-to-noise ratio. Although DL can partially compensate through learned priors, overly strong priors risk suppressing subtle pathological features, introducing a fundamental trade-off between spatial resolution, acquisition time, SNR, and quantitative reliability.
+
+An alternative strategy involves rapidly acquiring low resolution (LR) qMRI and subsequently applying super-resolution (SR) techniques to enhance the image quality. The supervised SR approach of Chaudhari et al.~\cite{b4}, developed for wMRI, can be applied to qMRI SR but faces a fundamental limitation: the requirement for HR ground truth during training. For qMRI specifically, obtaining HR parametric maps at the scale and diversity needed for supervised training is even more challenging. Most available qMRI datasets are limited to healthy volunteers, making it difficult for supervised models to generalize to pathological cases where tissue properties may differ substantially from training data. 
+
+To address this training data bottleneck, recent self-supervised strategies aim to learn HR qMRI directly from routine wMRI without requiring HR qMRI for training. For instance, Qiu et al.~\cite{b5} proposed a framework where predicted qMRI maps are passed through a known forward signal model to synthesize corresponding wMRI, with the synthesized images compared to acquired wMRI as supervision. This eliminates the need for HR qMRI training labels. However, in subsequent work~\cite{b6}, the same authors relied on three conventional wMRI as inputs while supervising with ground-truth qMRI, limiting the method's fully self-supervised potential. Similarly, Moya-Sáez et al.~\cite{b7} estimate HR qMRI from routine clinical images but still require HR qMRI during training for supervision, restricting applicability in settings where such data is scarce. \added{From a signal-theoretic perspective, recovering all three qMRI maps requires sufficient contrast diversity in the input weighted images — typically multiple acquisitions with varying repetition times or echo times. Methods relying solely on routine clinical wMRI for self-supervision are therefore constrained by the number and diversity of available contrasts, which in standard clinical protocols is often insufficient to uniquely determine all parameters.\footnote{\textcolor{blue}{Added in response to R4.2 and R2.4 .}}}
+
+
+A parallel line of research has explored using side information—typically high-resolution contrast-weighted images from complementary sequences—to improve reconstruction quality in accelerated MRI. Methods such as TGVN~\cite{b8} demonstrate that incorporating auxiliary contrast images can disambiguate ill-posed inverse problems and improve spatial resolution. However, these approaches operate on contrast images rather than quantitative parametric maps, addressing the fundamentally different problem of k-space undersampling during acquisition. While conceptually related through their use of complementary imaging data, side information methods for contrast reconstruction cannot directly address qMRI super-resolution: contrast images are sequence-dependent and lack the quantitative, scanner-independent tissue properties that define relaxometry parameters. Our work bridges these domains by formulating qMRI SR as a physics-informed problem that leverages routine clinical contrast images as spatial priors while preserving the quantitative nature of the parametric maps.
+
+In summary, two divergent paradigms have emerged: (1) bypassing qMRI acquisition entirely by estimating HR qMRI directly from conventional wMRI using DL, and (2) acquiring LR qMRI followed by supervised SR using HR qMRI ground truth for training. The former approach, by eliminating the need for any qMRI acquisition, discards decades of progress in qMRI methodology and produces patient-specific parametric maps with no patient-specific quantitative measurements for validation---while these methods are trained and calibrated using population-level ground truth data, their clinical deployment relies entirely on learned priors without any acquired quantitative reference from the individual patient being scanned. The latter preserves the quantitative measurement within the clinical workflow and enables rigorous patient-specific validation by comparison with the acquired LR qMRI, but it is constrained by the practical difficulty of acquiring sufficient HR qMRI training data, especially in patient populations. This raises critical questions on how best to balance acquisition efficiency with data fidelity while enabling integration of qMRI into clinical practice: Can qMRI SR be guided using only data already available in routine clinical protocols---thereby minimizing additional acquisition burden while leveraging highly representative data---to facilitate broader clinical adoption and integration of qMRI into standard imaging workflows for objective, rigorous validation?
+
+\subsection{Proposed Framework}
+\begin{table*}[!h]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\caption{\added{Comparison of SWIG qMRI SR with representative prior 
+methods across four key design properties. \checkmark~=~satisfied; 
+\texttimes~=~not satisfied; --~=~not applicable to this method's 
+problem domain; (1) No HR qMRI supervision target required; 
+(2) SR guided by routine clinical wMRI; (3) Acquired LR qMRI preserved 
+as quantitative anchor; (4) Cross-sequence generalizability.}}
+\label{tab:method-comparison}
+\newcolumntype{Y}{>{\centering\arraybackslash}X}
+\begin{tabularx}{\textwidth}{>{\hsize=1.4\hsize}X
+                              >{\hsize=0.65\hsize}Y
+                              >{\hsize=0.65\hsize}Y
+                              >{\hsize=0.65\hsize}Y
+                              >{\hsize=0.65\hsize}Y}
+\toprule
+\added{\textbf{Method}} & 
+\added{\textbf{(1) No HR qMRI}} & 
+\added{\textbf{(2) wMRI guided}} & 
+\added{\textbf{(3) LR anchor}} & 
+\added{\textbf{(4) Cross-sequence}} \\
+\midrule
+\added{Supervised SR~\cite{b4}}               
+  & \added{\texttimes} & \added{\texttimes} & \added{\checkmark} & \added{\checkmark} \\
+\added{Direct wMRI-to-qMRI~\cite{b5,b6,b7}}  
+  & \added{\checkmark} & \added{\checkmark} & \added{\texttimes}  & \added{\texttimes} \\
+\added{Physics-informed recon.~\cite{b3}}     
+  & \added{\checkmark} & \added{\texttimes}  & \added{\texttimes} & \added{\texttimes} \\
+\added{Side-info recon.~\cite{b8}}            
+  & \added{--} & \added{\checkmark} & \added{--}  & \added{--} \\
+\added{\textbf{SWIG qMRI SR (ours)}}          
+  & \added{\checkmark} & \added{\checkmark} & \added{\checkmark} & \added{\checkmark} \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+We propose a framework termed \textbf{S}elf-Supervised \textbf{W}eighted \textbf{I}mage \textbf{G}uided \textbf{qMRI} \textbf{S}uper-\textbf{R}esolution (\textbf{SWIG qMRI SR}) that enhances the resolution of LR qMRI using HR wMRI scans as guidance. While the use of HR wMRI as guidance resembles the methods by Atalık et al.~\cite{b8} that leverage side information for MRI reconstruction, their approach reconstructs contrast images from undersampled k-space—operating  within wMRI domain. In contrast, SWIG qMRI SR addresses qMRI SR using wMRI as guides, requiring physics-based forward models to bridge these distinct domains while preserving absolute quantitative tissue values.
+Our approach differs from existing qMRI SR methods in that it does not require HR parametric maps as training targets, nor the acquisition of additional wMRI beyond standard clinical protocols. Instead, we employ a physics-informed, self-supervised training strategy that minimizes the discrepancy between acquired HR wMRI and corresponding images synthesized from predicted HR qMRI maps via forward signal models \added{and keeping predicted HR qMRI consistent with LR qMRI inputs}. This design utilizes HR wMRI data already present in routine clinical imaging workflows.
+
+By operating on qMRI maps rather than raw contrast series of qMRI acquisition, our framework decouples from protocol-specific acquisition choices in the quantitative mapping process itself. This design choice is hypothesized to enable cross-qMRI sequence (cross-sequence) generalization: since the method operates on scanner-independent tissue relaxometry parameters rather than sequence-dependent signal intensities, it may allow application to qMRI data from different acquisition protocols beyond those used during training.
+SWIG qMRI SR combines four key design properties: (1) no requirement for HR parametric maps during training, (2) SR guidance from routine clinical wMRI, (3) preservation of acquired LR qMRI measurements for quantitative validation and traceability, and (4) cross-sequence generalizability by operating on protocol-independent tissue relaxometry parameters rather than sequence-specific signal intensities. This combination distinguishes the proposed approach from methods that either bypass qMRI acquisition entirely or require HR qMRI training data. 
+
+\added{No prior method simultaneously satisfies all four properties. Methods that estimate qMRI directly from wMRI~\cite{b5,b6,b7} satisfy property (1) if sufficient wMRI are available, but discard acquired LR qMRI measurements as a quantitative reference, violating (3), and 
+operate on sequence-dependent signal intensities, violating (4). Supervised SR methods~\cite{b4} preserve quantitative traceability but require HR qMRI training data, violating (1). Physics-informed reconstruction methods~\cite{b3} incorporate acquisition-side constraints but remain protocol-specific, violating (4). The  contribution of SWIG qMRI SR is the identification and closure of this gap, as summarized in Table~\ref{tab:method-comparison}.\footnote{\textcolor{blue}{Added in response to R2.4 and 4.4}}}
+
+
+\section{Material and Methods}
+\subsection{Notation}
+Let $Q$ represent a set of qMRI maps (PD, T1, T2), with subscripts $l$ and $h$ denoting LR and HR versions, respectively. Parametric maps $\hat{Q}$ are estimated from a set of contrast images $C = \{ C^i\quad \forall i \}$ by a signal-fitting process $\mathcal{S}$
+
+\begin{equation}
+\hat{Q} = \mathcal{S}(C) = \arg\min_Q \sum_i \| C^i - \mathcal{M}^i(Q) \|^2,
+\label{Signalfitting}
+\end{equation}
+where $\mathcal{M}^i$ is the forward model that models the $i$-th wMRI:
+\begin{equation}
+\hat{C}^i = \mathcal{M}^i(\hat{Q}).
+\label{phmodel}
+\end{equation} 
+
+
+Operator \( \Phi \) simulates $k$-space undersampling to generate LR from HR contrast images
+\begin{equation}
+C^i_l = \Phi^i(C^i_h) = \mathcal{F}^{-1} ( (\mathcal{F}(C^i_h) + \epsilon) \circ B^i ),
+\label{partialsampling}
+\end{equation}
+where \( B^i \) is a binary $k$-space mask that is multiplied element-wise (denoted by \( \circ \)), \( \mathcal{F} \) and \( \mathcal{F}^{-1} \) denote the Fourier and inverse Fourier transforms respectively and \( \epsilon \sim \mathcal{N}_c(0, \sigma^2) \) is a realization of zero mean complex Gaussian noise, with variance $\sigma^2$ independently drawn for each voxel.
+
+For each guide $W^j$ the forward model is
+\begin{equation}
+    W^j = \mathcal{M}_g^j(Q_h),
+    \label{phmodel1}
+\end{equation}
+\deleted{and the guide set $W = \{ W^j \quad \forall j \}$ consists of one or more HR wMRI (e.g., T1-weighted (T1w), T2-weighted (T2w) images) used for SR guidance.}\added{where the index $j \in \{1, \ldots, N_g\}$ iterates over the set of guide images (e.g., $j=1$ for T1-weighted (T1w), $j=2$ for T2-weighted (T2w)) for SR guidance. In summary, $C$ denotes contrast images acquired as part of the qMRI protocol and used for parameter fitting, while $W$ denotes independently acquired routine clinical weighted  images serving exclusively as HR structural guides.\footnote{\textcolor{blue}{Added in response to R4.5.1}}}
+
+\subsection{SWIG qMRI SR Framework}
+The framework estimates HR qMRI, $\hat{Q}_h$, from $Q_l$ using guidance from conventional HR wMRI, $W$. In the derivation below, we assume all images are resampled to the same voxel grid. We define SR as the recovery of high-spatial-frequency information that is absent in $Q_l$ but present in $W$ and representable at the shared voxel grid---thus, SR refers to enhancement of spatial frequency content rather than voxel count increase.
+
+To formalize the relationship between  $Q_l$, \(W\), and the desired HR estimate, $\hat{Q}_h$, we start from Bayes' rule
+
+\begin{equation}
+    p(\hat{Q}_h \mid C_l,W)  
+    = \frac{p(C_l, W \mid \hat{Q}_h) \cdot p(\hat{Q}_h)}{p(C_l, W)}.
+    \label{bayes_rule}
+\end{equation}
+This posterior probability reflects how likely a candidate HR map $\hat{Q}_h$ is, given the observed data $(C_l, W)$. The denominator \( p(C_l, W) \) is a normalizing constant (independent of $\hat{Q}_h$) and can be ignored when formulating an optimization objective. Assuming a non-informative (uniform) prior on $\hat{Q}_h$ and conditional independence of $C_l$ and $W$ given $\hat{Q}_h$, the posterior simplifies to
+
+
+\begin{equation}
+  p(\hat{Q}_h \mid C_l, W)  \propto 
+  p(C_l \mid \hat{Q}_h) \cdot p(W \mid \hat{Q}_h).
+\label{eq:likelihood}
+\end{equation}
+To express these likelihood terms explicitly, we invoke the forward models $\mathcal{M}^i$ and $\mathcal{M}_g^j$ (\eqref{phmodel}, \eqref{phmodel1}) and downsampling operator $\Phi^i$ (\eqref{partialsampling}) to synthesize predicted observations $\hat{C}_l^i$ and $\hat{W}^j$ from candidate HR maps $\hat{Q}_h$. Maximum a posteriori (MAP) inference gives
+
+\begin{equation}
+\hat{Q}_h = \arg\max_{\hat{Q}_h} \big[ p(C_l \mid \hat{C}_l)    \cdot p(W \mid \hat{W})  \big] 
+\label{1}
+\end{equation}
+which is equivalent to minimizing the negative log-likelihood
+{\small
+\begin{align}
+L =  - \log p(C_l \mid \hat{C}_l) -\log p(W \mid \hat{W}) = L_l + L_h
+\label{eq:neg_log_likelihood}
+\end{align}
+}
+The LR data consistency term $L_l$ enforces absolute intensity matching between acquired and predicted contrast images. The contrast images $C_l^i$ (from qMRI acquisition) and $\hat{C}_l^i$ (synthesized from $\hat{Q}_h$ via forward model $\mathcal{M}^i$ and subsequently downsampled via $\Phi^i$) represent the same physical measurement at different processing stages—they must match in absolute signal values to preserve quantitative accuracy. Any metric that permits arbitrary scaling of intensities would allow $\hat{Q}_h$ values that satisfy the metric while destroying the quantitative nature of the parametric maps. Assuming Gaussian distribution for $p(C_l \mid \hat{C}_l)$, we define
+
+\begin{equation}
+\begin{aligned}
+    -\log p(C_l \mid \hat{C}_l) = L_{\text{l}}
+    &=   \sum_{i} ( \text{MSE}(C_l^i, \hat{C}_l^i)/\sigma^2 ),
+\end{aligned}
+\label{hl}
+\end{equation}
+
+where MSE enforces voxel-wise intensity agreement necessary for maintaining absolute quantitative values.
+
+\textbf{Handling Intensity Variations in Guide Images}: MR images exhibit intensity variations from sequence differences, prescan normalization, and acquisition-dependent gain changes. To handle intensity scaling between acquired $W$ and synthetic $\hat{W}$, we assume linear relationship $\hat{W}^{j}(x) = f(W^{j}) = a \cdot W^{j} + b$ where $a$ and $b$ are global scalar factors. Hence, rather than forcing absolute intensities to match, we maximize the correlation ratio~\cite{b9} between $W^j$ and $\hat{W}^j$\deleted{:}
+
+\begin{equation}
+    \eta^2(W^i \mid \hat{W}^i) = 1 - \frac{\text{Var}(W^i - \hat{W}^i)}{\text{Var}(W^i)}
+\end{equation}
+\added{where $\text{Var}(\cdot)$ denotes the sample variance computed over brain-masked voxels\footnote{\textcolor{blue}{Added in response to R4.5.1}}.} The guide loss as the complement of this ratio is
+\begin{equation}
+\begin{aligned}
+    L_h(W, \hat{W}) =L_h
+    &=\sum_{j}  \frac{\text{Var}(W^j - \hat{W}^j)}{\text{Var}(W^j)}.
+    \label{ll}
+\end{aligned}
+\end{equation}
+
+
+
+
+In summary, \eqref{eq:neg_log_likelihood} defines the objectives of SWIG qMRI SR, as: (1) Ensuring consistency with \( C_l \) by enforcing that images synthesized from  $\hat{Q}_h$\ using \eqref{phmodel}, after undergoing downsampling/blurring as described in \eqref{partialsampling}, are consistent with \( C_l \), (2) Maximizing the correlation ratio between the guide \( W^j \) and the synthesized image from $\hat{Q}_h$\ in \eqref{phmodel1} for all guides . 
+
+The two loss terms operate on different scales and represent different measurements: $L_l$ measures pixel-wise intensity consistency via MSE, while $L_h$ measures correlation ratio. Moreover, since $L_h$ does not derive from a full statistical description of the guide images, the scale of this term must be balanced with respect to the contrast image loss $L_l$. To balance their contributions during optimization, we introduce a weighting factor, $\alpha$, which controls the relative influence of structural guidance from the guide versus quantitative data consistency. Hence we rewrite \eqref{eq:neg_log_likelihood} as
+\begin{equation}
+L_{total} =  L_l + \alpha L_h.
+\label{eq:weighted_loss}
+\end{equation}
+
+\added{$L_{total}$ is computed exclusively from acquired LR contrast images $C_l$ and HR guide images $W$ --- neither term involves $Q_h$ at any point during training. The framework is therefore self-supervised in the sense that it requires no HR qMRI ground truth for optimization: $Q_h$ is never a supervision target, and the optimization is driven entirely by the physics-informed consistency between predicted and observed measurements.\footnote{\textcolor{blue}{Added in response to R2.1 and R4.4.}}}
+
+
+
+
+\section{Experiments}
+
+\begin{figure*}[!ht]
+    \centering
+    \includegraphics[width=\textwidth]{samad1.png}
+    \caption{(a) Synthetic data generation for training the framework. (b) Training CNN and inference scheme for SWIG qMRI SR. (c) The ResNet-like CNN.}
+    \label{PHIREQ-training-scheme}
+\end{figure*}
+\subsection{Dataset}  
+We used two types of data: synthetic data for controlled experiments (training, validation, and ablation studies) and independently acquired \added{phantom\footnote{\textcolor{blue}{Added in response to R1.2 and R3.2.}} and }in-vivo data to assess real-world performance and cross-sequence generalizability. All data acquisition protocols were approved by the institutional review board, and informed consent was obtained from all volunteers prior to scanning.
+
+\subsubsection{Synthetic Data Generation}
+For our experiments, we created a synthetic dataset from acquired qMRI scans. qMRI maps from 27 subjects were acquired using an 1.5T Optima MR450w and 1.5T SIGNA Artist (GE
+Healthcare, Milwaukee, Wisconsin) with the AIR 24-channel head coil. The QRAPMASTER sequence~\cite{b10} was used to obtain 2D parametric maps (\(Q_h\)) of proton density (PD), T1, and T2, with each slice reconstructed via MAGnetic resonance Image Compilation (MAGiC) software (SyntheticMR, Linköping, Sweden)~\cite{b11}. The parameter maps have value ranges up to 160 arbitrary units (a.u.), 4300 ms, and 2000 ms for PD, T1, and T2, respectively.
+
+To generate \( Q_l \), we synthesized 12 contrasts from \( Q_h \): 6 T1w and 6 T2w. The T1w contrasts used a saturation-recovery
+\begin{equation}
+    C_h^i = PD \cdot \left( 1 - e^{-TR^i/T1} \right), \quad i = 1, \dots, 6,
+\end{equation}  
+with $TR^i \in \{360, 540, 810, 1215, 1822, 2733\}$ ms as repetition times. T2w contrasts used a spin-echo decay
+\begin{equation}
+    C_h^{i+6} = PD \cdot e^{-TE^i/T2}, \quad i = 1, \dots, 6,
+\end{equation}  
+with $TE^i \in \{10, 20, 40, 80, 160, 320\}$ ms as echo times.
+
+Then \( C_l^i \) was synthesized using \eqref{partialsampling} with complex Gaussian noise ($\sigma = 0.1$) added to the \( k\)-space, and a square binary mask \( B^i \), retaining one-quarter of central  \(k\)-space.
+Maximum likelihood estimation was employed in \eqref{Signalfitting} to estimate \( Q_l \).
+
+For \( W \), HR T1w synthesized using the inversion-recovery (IR) spoiled gradient-echo (SPGR) signal equation
+
+\begin{align}
+W^1 =\;& 
+    - M_{z,\mathrm{eq}} \cdot e^{-TD / T1} 
+    + PD \cdot \left( 1 - e^{-TD / T1} \right) \cdot e^{-TP / T1} \notag \\
+    &+ PD \cdot \left( 1 - e^{-TP / T1} \right),
+    \label{IR-GRE}
+\end{align}
+where the steady-state longitudinal magnetization \( M_{z,\mathrm{eq}} \) is given by
+
+\begin{equation}
+M_{z,\mathrm{eq}} = PD \cdot \frac{1 - e^{-TR / T1}}{1 - \cos(\alpha) \cdot e^{-TR / T1}} \cdot e^{-TE / T2},
+\end{equation}
+with \( TP \) as time from inversion to acquisition, \( TD \) as delay before inversion and \( \alpha \) as flip angle in degrees.
+
+HR T2w synthesized using the spin-echo (SE) signal equation
+\begin{equation}
+W^2 = PD \cdot \frac{\sin(180^\circ - \alpha) \cdot \left(1 - e^{-(TR - TE)/T1} \right)}{1 - \cos(180^\circ - \alpha) \cdot e^{-(TR - TE)/T1}} \cdot e^{-TE/T2},
+\label{PROPELLER}
+\end{equation}
+
+Acquisition parameters mimicking routine MRI were: T1w: \( TR/TE/TP/TD/\alpha = 6.6\,\mathrm{ms}/2.6\,\mathrm{ms}/450\,\mathrm{ms}/0 \mathrm{ms}/12^\circ\); T2w: \(
+TR/TE/\alpha = 5211\mathrm{ms}/146\mathrm{ms}/160^\circ
+\).
+
+The dataset was split into 7 training, 3 validation, and 17 test subjects. All images were brain-masked using HD-BET.\cite{b12}.
+\added{Note that although $Q_h$ is used to prepare training inputs --- generating $Q_l$ via $k$-space truncation and synthesizing $W$ via forward signal models --- it is never used as a supervision target, consistent with the self-supervised formulation of $L_{total}$ in \eqref{eq:weighted_loss}. In these synthetic experiments, $Q_h$ is reserved exclusively as a held-out validation reference.\footnote{\textcolor{blue}{Added in response to R2.1, R3.2, and R4.4.}}}
+
+\subsubsection{Acquired Data for Validation}
+\label{acquired_data}
+
+To evaluate for real-world performance and cross-sequence generalizability, we acquired data using a different qMRI protocol while maintaining identical acquisition parameters for $W$  used for guidance.
+
+\paragraph{qMRI Acquisition and Reconstruction.}
+\deleted{One healthy volunteer was} \added{An ISMRM/NIST~\cite{b28} phantom \footnote{\textcolor{blue}{Added in response to R1.2 and R3.2.}}  and $N=10$ healthy volunteers were \footnote{\textcolor{blue}{Added in response to R1.1, R2.2, R3.3 and R4.3}}} scanned on a GE SIGNA Premier 3.0T scanner (AIR 48-channel head coil) using the Multi-Parametric Zero Echo Time (MuPa-ZTE) sequence~\cite{b13,b14}, a silent, phyllotaxis 3D acquisition for simultaneous PD, T1 and T2 mapping. \added{The phantom was scanned for 10 minutes to obtain a high-quality reference, while each volunteer was scanned for 5 minutes.\footnote{\textcolor{blue}{Added in response to R1.2 and R3.2.}} } Three qMRI quality levels were generated from this acquisition: (1) \textbf{Fast protocol (Acq1):} 1-minute acquisition simulated by retaining \deleted{25\%} \added{first 1-minute} of acquired spokes, reconstructed with sparse fine gridding~\cite{b15} and dictionary-based parameter fitting~\cite{b16,b17}, (2) \textbf{Standard protocol \deleted{(Acq5)}\added{AcqS}:} \deleted{5-minute}\added{Full-duration} acquisition with sparse fine gridding and dictionary-based parameter fitting and (3) \textbf{ReconDL-enhanced protocol 
+(\deleted{Acq5$^{\text{R}}$}\added{AcqS$^{\text{R}}$}):} 
+\deleted{5-minute}\added{Full-duration} acquisition reconstructed with 
+AIR\textsuperscript{TM} Recon DL~\cite{b18,b19} (supervised 
+convolutional neural network trained on HR references). 
+\added{AcqS$^{\text{R}}$ is included as a clinically deployed reference: AIR\textsuperscript{TM} Recon DL is in routine clinical 
+use, making it the practically relevant upper bound against which SWIG qMRI SR is benchmarked.\footnote{\textcolor{blue}{Added in 
+response to R2.3.}}}
+
+Each protocol serves as LR input to SWIG qMRI SR, while higher-quality protocols serve as reference. The pseudorandom phyllotaxis trajectory ensures uniform k-space sampling, making the fast protocol truncation representative of actual undersampled acquisitions~\cite{b13,b14,b20}. This experimental design enables: \added{(0) evaluation of quantitative 
+accuracy under weighted-image guidance when transitioning from synthetic 
+to acquired data, using acquired phantom data \footnote{\textcolor{blue}{Added in response to R1.2 and R3.2.}}} (1)  performance evaluation of SWIG qMRI SR on independently acquired in-vivo data (2) whether guide images provide complementary information by comparing SR outputs from Acq1 and \deleted{Acq5}\added{AcqS} inputs against the \deleted{Acq5$^{\text{R}}$} \added{AcqS$^{\text{R}}$} reference, and (3) whether SR can further enhance maps already processed by state-of-the-art supervised DL reconstruction (\deleted{Acq5$^{\text{R}}$} \added{AcqS$^{\text{R}}$} as input).
+
+\paragraph{Weighted Images.}
+Standard clinical images (T1w IR-SPGR and T2w SE) were acquired with parameters matching the HR wMRI in the training dataset. A T2-FLAIR image was also acquired to evaluate synthesis fidelity for contrasts not used as guidance. All weighted images were registered and resampled to the qMRI coordinate system using rigid-body registration with elastix~\cite{b21,b22}.
+
+
+\subsection{Implementation Details}
+
+\subsubsection{Network Architecture}
+As core of CNN, we use a ResNet-based architecture~\cite{b23} consisting of an initial convolutional layer, five residual blocks, and a final output convolution (Fig.~\ref{PHIREQ-training-scheme}c). Each residual block contains two convolutions with batch normalization and ReLU activation, connected via skip connections for improved gradient flow.  The final layer is a $9\times9$ convolution with linear activation to produce the refined HR parametric maps. \added{The choice of a ResNet backbone was deliberate: since the primary contribution of this work lies in the physics-informed self-supervised optimization framework rather than architectural design, a well-understood architecture was selected to avoid confounding the evaluation with architectural complexity. Since SWIG qMRI SR is formulated as a MAP inference problem (\eqref{eq:weighted_loss}), the optimization objective is architecture-agnostic and could in principle be implemented with any differentiable parametric model. To assess whether performance is governed by the optimization framework or by architectural capacity, an empirical comparison with a U-Net backbone is included in Section~\ref{Ablation Study: Individual Component Contributions}.\footnote{\textcolor{blue}{Added in response to R2.6, R4.4 and R4.5.4.}}}
+
+\added{Moreover, direct comparison with other SR methods (e.g., GAN- or diffusion-based approaches) is not performed, as these methods are typically trained in a fully supervised setting requiring high-resolution qMRI ground truth—an assumption our framework explicitly avoids. As such, a head-to-head comparison would not be methodologically consistent and may lead to misleading conclusions.\footnote{\textcolor{blue}{Added in response to R2.3 and 3.4.}} }
+
+\subsubsection{Input Configuration and Preprocessing}
+The network input consists of the LR qMRI $Q_l$ (with one channel per parameter, e.g., $T_1$ and $T_2$ maps) concatenated channel-wise with the HR guide $W$ (Fig.~\ref{PHIREQ-training-scheme}b).
+
+The qMRI maps have constant physiological ranges and must not be dynamically normalized to preserve quantitative accuracy. However, to provide the ResNet with appropriately scaled input values, parameter-specific scaling layer divide each channel of $Q_l$ by its mean value computed over brain-masked regions across the training dataset. The inverse scaling is applied to the output $\hat{Q}_h$ to restore correct quantitative values. The guide images $W$ may be arbitrarily scaled due to acquisition-dependent factors. Hence, each guide is z-score normalized to zero mean and unit variance, with statistics computed over brain-masked voxels. This normalization ensures stable training across parameters with different value scales.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=\textwidth]{samad2.png}
+    \caption{Super-resolved parametric maps from ablation study experiments on a representative slice. Rows: PD (top), T1 (middle), T2 (bottom). Columns: ground-truth $Q_h$ (left), model predictions $M_{1}^{++}$ through \deleted{$M_{12}^{--}$} \added{$M^{s}$} (center), LR input $Q_l$ (right). Slice-specific \added{metrics relative to $Q_h$ are also shown. Difference maps for $M^{s}$, $M_{12}^{++}$ and $M_{12}^{++, U}$ for the selected slice relative to $Q_h$ are also shown.}  \deleted{SSIM and HFEN relative to $Q_h$ shown below each map}.}
+
+    \label{fig:synthetic_data_Slice}
+\end{figure*}
+
+
+\subsubsection{Training Configuration}
+
+The model is implemented in PyTorch and trained to minimize the loss function $L_{total}$ in \eqref{eq:weighted_loss} using the ADAM optimizer with a learning rate of $10^{-5}$ on an A40 GPU (NVIDIA, Santa Clara, CA). \deleted{Empirically, we found that weighting the guide loss term $L_h$ 
+by a factor of $\alpha$ = 1000 relative to $L_l$ balances the 
+contributions of the two loss components. This weighting accelerates 
+learning of high-frequency structural details from the guide while 
+preserving quantitative fidelity to the acquired LR measurements.\footnote{\textcolor{red}{Removed in response to R1.5 and R2.5}}}
+The training scheme is shown in Fig.~\ref{PHIREQ-training-scheme}B.
+
+
+\subsection{Evaluation Metrics}
+\label{sec:eval_metrics}
+We evaluate SR outputs using direct qMRI assessment and indirect evaluation via synthetic weighted image quality.
+
+\subsubsection{Direct qMRI Quality Assessment}
+For experiments with available ground-truth HR qMRI ($Q_h$), we compute: (1) Structural Similarity Index (SSIM)~\cite{b24}: which approximates perceptual similarity (range 0-1, higher is better), (2) High-Frequency Error Norm (HFEN)~\cite{b25}: which quantifies edge preservation errors (lower is better) \added{and (3) Mean Absolute Error (MAE): which measures voxel-wise quantitative accuracy in physical units (ms for T1 and T2, a.u. for PD; lower is better).\footnote{\textcolor{blue}{Added in response to R1.2 and R3.2.}}} Metrics are computed between ($\hat{Q}_h$) and ground truth ($Q_h$), while the metric computed between $Q_l$ and $Q_h$ is provided as baseline \deleted{baseline}.
+
+\subsubsection{Indirect Assessment via Synthetic Weighted Images}
+Since wMRIs are the primary diagnostic modality in clinical practice, 
+we assess SR performance quality by evaluating synthesized wMRI 
+realism. For each image in $W$, we: (1) synthesize corresponding 
+images from $Q_l$ and $\hat{Q}_h$ using forward models with 
+acquisition-matched parameters, (2) compute SSIM, HFEN, \added{and 
+Peak Signal-to-Noise Ratio (PSNR), which measures overall 
+reconstruction fidelity in dB (higher is better)\footnote{\textcolor{blue}{Added in response to R4.5.3}},} between synthetic 
+and acquired images, and (3) compare synthesis quality from $\hat{Q}_h$ 
+versus from $Q_l$.
+
+
+\subsection{Experimental Validation}
+
+\subsubsection{Ablation Study: Individual Component Contributions}
+\label{Ablation Study: Individual Component Contributions}
+We systematically evaluate the contribution of each framework component through controlled ablation experiments. Specifically, we address two questions: (1) Can HR wMRIs (T1w, T2w) effectively guide qMRI SR without HR qMRI training data? (2) Is LR qMRI necessary at inference, or can SR be performed using only HR wMRI?
+
+To answer these questions, we train five model variants with different input and supervision configurations (Table~\ref{tab:model-configs}). We denote these models as $M_{guide}^{qMRI}$ where the subscript indicates the guide (1=T1w, 2=T2w, 12=both) and superscript positions encode: (1) whether $Q_l$ is model input (+/-), (2) whether $C_l$ data consistency is used in loss (+/-).
+
+
+Model $M_{12}^{++}$ represents the full SWIG qMRI SR framework with all components active. Models $M_{1}^{++}$ and $M_{2}^{++}$ isolate the contribution of individual guide. Model $M_{12}^{-+}$ tests whether HR wMRIs alone can provide sufficient information when data consistency is maintained during training but $Q_l$ is unavailable at inference. Model $M_{12}^{--}$ represents pure SR from wMRI without any quantitative constraints.  \added{Together, $M_{12}^{-+}$ and $M_{12}^{--}$ probe whether two weighted images (one T1w and one T2w)---a constraint representative of direct wMRI-to-qMRI mapping approaches and most clinical protocols---are sufficient for accurate quantitative parameter recovery in the absence of LR qMRI as an anchor.\footnote{\textcolor{blue}{Added in response to R4.2.}}}
+
+Performance is evaluated using metrics defined in Section~\ref{sec:eval_metrics} and qualitative visual assessment of structural detail recovery and noise reduction. \added{We also define model $M^{s}$ which serves as a fully supervised upper bound: the network architecture and inputs---$Q_l$ and  $W_h$ guides---are identical to $M_{12}^{++}$, but the physics-informed losses $L_l$ and $L_h$ are replaced by direct MSE supervision against $Q_h$. Since $Q_h$ is available in the synthetic experiment, this model quantifies the performance ceiling achievable with HR qMRI supervision, and any gap between $M^{s}$ and $M_{12}^{++}$ reflects the cost of the self-supervised formulation. Note that $M^{s}$ requires HR qMRI} \added{as a training target and therefore cannot be deployed in the clinical scenario that motivates SWIG qMRI SR\footnote{\textcolor{blue}{Added in response to R2.3, R3.4, 4.4, and R4.5.4}}.}
+\begin{table}[!h]
+\centering
+\caption{Model configurations for ablation experiments. Notation: 
+$M_{guide}^{qMRI}$ where subscript=guide (1=T1w, 2=T2w, 12=both); 
+superscript first position=$Q_l$ as input (+=yes, -=no); second 
+position=$C_l$ data consistency (+=yes, -=no). \added{$M_{12}^{++,\text{U}}$ 
+uses a U-Net backbone under identical conditions to $M_{12}^{++}$. 
+$M^{s}$ denotes the fully supervised upper bound.}}
+\label{tab:model-configs}
+
+\newcolumntype{Y}{>{\centering\arraybackslash}X}
+\renewcommand{\arraystretch}{2}
+
+\begin{tabularx}{\columnwidth}{%
+  >{\hsize=0.8\hsize}Y  % Model column
+  >{\hsize=1.0\hsize}Y  % qMRI input
+  >{\hsize=1.2\hsize}Y  % Data consistency
+  >{\hsize=1.0\hsize}Y  % T1w guide
+  >{\hsize=1.0\hsize}Y  % T2w guide
+}
+\toprule
+Model & qMRI Input & Data Consistency & T1w Guide & T2w Guide \\
+\midrule
+\( M_{12}^{++} \)             & Yes & $L_l + \alpha L_h$ & Yes & Yes \\
+\( M_{2}^{++} \)              & Yes & $L_l + \alpha L_h$ & No  & Yes \\
+\( M_{1}^{++} \)              & Yes & $L_l + \alpha L_h$ & Yes & No  \\
+\( M_{12}^{-+} \)             & No  & $L_l + \alpha L_h$ & Yes & Yes \\
+\( M_{12}^{--} \)             & No  & None               & Yes & Yes \\
+\added{\( M_{12}^{++,\text{U}} \)} & \added{Yes} & \added{$L_l + \alpha L_h$} & \added{Yes} & \added{Yes} \\
+\added{\( M^{s} \)}           & \added{Yes} & \added{MSE$(Q_h)$}          & \added{Yes} & \added{Yes} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\textbf{Model Selection:} We rank models separately for each parametric map (PD, T1, T2) based on mean \deleted{SSIM and HFEN} \added{SSIM, HFEN and MAE\footnote{\textcolor{blue}{Added in response to R1.2 and R3.2.}}} values across 17 test subjects, assigning lower ranks to better performance \deleted{(higher SSIM, lower HFEN)} 
+\added{(higher SSIM, lower HFEN and MAE)}. \added{Models $M_{12}^{++,\text{U}}$ and $M^{s}$ are excluded from ranking as they serve} \added{distinct purposes: $M_{12}^{++,\text{U}}$ evaluates architectural sensitivity rather than framework performance, and $M^{s}$ establishes a supervised upper bound that cannot be deployed in the clinical setting that motivates this work.} The final model score is the sum of ranks across all metrics and maps. The lowest-scoring model is selected for validation on separately acquired in-vivo data.
+
+
+\added{\textbf{Sensitivity Analysis\footnote{\textcolor{blue}{Added in response to R1.5 and R2.5.}} of Loss Weighting Parameter $\alpha$ :} To assess the sensitivity of the framework to the loss weighting parameter $\alpha$, we trained eight independent instances of 
+$M_{12}^{++}$ with $\alpha \in \{0.01, 0.1, 1, 10, 100, 1000, 10000, 100000\}$, holding all other hyperparameters fixed. MAE relative to $Q_h$ was computed separately for T1, T2, and PD maps. The selected $\alpha$ minimizes mean MAE across  all parametric maps while ensuring stable and efficient convergence to the correct solution. The value of $\alpha$ selected from this analysis was used for all defined experiments 
+reported results in this work.}
+
+
+\added{\textbf{Architectural Comparison\footnote{\textcolor{blue}{Added in response to R2.6.}} --- ResNet vs.\ U-Net:} To assess whether performance is primarily driven by the physics-informed optimization framework or by architectural capacity, we trained a second instance of $M_{12}^{++}$ using a U-Net architecture in place of the 
+ResNet backbone, under identical conditions: the same loss formulation $L_l + \alpha L_h$, the same training data, optimizer, learning rate, and convergence criterion. The ResNet and U-Net were matched in parameter count at approximately [X]M parameters. Evaluation was performed on the same held-out synthetic test set used in the main ablation study, with MAE, SSIM, HFEN, and PSNR computed separately for T1, T2, and PD maps and reported in Table~\ref{tab:improvement}.}
+
+\subsubsection{Evaluation on In-vivo Data}
+In this section we apply the best-performing model to three protocols described in Section~\ref{acquired_data}. 
+
+\textbf{qMRI Qualitative evaluation:} We compare ($\hat{Q}_h$) qualitatively against higher quality qMRI, focusing on structural detail recovery and quantitative value preservation. Additionally, by treating qMRI from ReconDL-enhanced protocol as  $Q_l$  we test whether our framework can provide further improvement beyond what a state-of-the-art supervised DL reconstruction alone achieves.
+
+\textbf{Evaluation via wMRI Synthesis:} Since qMRI are valuable for their ability to synthesize contrasts via forward models, we validate SR quality by assessing synthesis fidelity. If $\hat{Q}_h$ accurately represents underlying tissue properties, it should synthesize wMRI that closely match acquired clinical scans. We evaluate synthesis quality in two complementary ways: (1) For each guide $W^i$, we synthesize corresponding images from both $Q_l$ and $\hat{Q}_h$ using the corresponding forward models (\eqref{IR-GRE}, \eqref{PROPELLER}) with acquisition-matched parameters. (2) We synthesize T2-FLAIR from $\hat{Q}_h$  using inversion-recovery signal model
+
+\begin{align}
+\text{T2-FLAIR} =\; 
+     \left(1 - 2e^{-TI / T1} + e^{-TR / T1} \right)\cdot e^{-TE / T2} ,
+    \label{T2-FLAIR-signal-equation}
+\end{align}
+where $TI$ is the inversion time and acqusition parameters matched to the acquired T2-FLAIR sequence, and compare against an independently acquired T2-FLAIR scan that was never used as guidance.
+
+Synthesis quality is assessed both quantitatively (SSIM, HFEN against acquired wMRI) and qualitatively (visual comparison of fluid suppression quality, anatomical detail, and artifacts). Superior synthesis fidelity from $\hat{Q}_h$ compared to $Q_l$ would indicate that SR has enhanced the quantitative information content beyond the original LR maps.
+
+
+The second test evaluates whether $\hat{Q}_h$ capture sufficient quantitative tissue information to predict contrasts outside the training distribution. Successful T2-FLAIR synthesis would demonstrate that SWIG qMRI SR transfers structural information from guide into quantitatively meaningful and correct parametric maps rather than merely copying guide features. Synthesized T2-FLAIR from $Q_l$ establishes baseline for qMRI SR.
+
+\section{Results} %fix to subsection not subsubsection
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Ablation Study: Individual Component Contributions}
+
+\textbf{Qualitative Performance on Single Slice:} Figure~\ref{fig:synthetic_data_Slice} presents qMRI SR results from five SR model variants. Model $M_{1}^{++}$ enhanced T1 maps while minimally affecting T2 maps. Conversely, $M_{2}^{++}$ improved T2 maps markedly with some T1 impact. The dual-guided $M_{12}^{++}$ achieved balanced enhancement across all parameters.
+Model $M_{12}^{-+}$ (no qMRI input at inference) produced qMRI maps with quantitative errors, particularly in gray matter T1 and PD estimation. Model $M_{12}^{--}$ failed completely and was excluded from further analysis.
+These visual observations are supported by quantitative metrics for this slice presented in the figure.
+
+
+\textbf{Quantitative Performance Across Test Subjects:} Figure~\ref{fig:boxplots} shows the SSIM and HFEN across the 17 test subjects. Model $M_{12}^{++}$ achieved the best SSIM and HFEN for PD and T1, with non-overlapping confidence intervals demonstrating statistically significant improvements over baseline (PD: 4.3\% SSIM improvement, 55.2\% HFEN reduction; T1: 3.2\% SSIM improvement, 52.4\% HFEN reduction). Single-guide models showed contrast-specific enhancement patterns: $M_{1}^{++}$ preferentially improved T1 maps (1.8\% SSIM gain) while $M_{2}^{++}$ enhanced T2 maps (0.4\% SSIM gain), confirming our hypothesis of guide-parameter correspondence. For T2 maps with high baseline quality (SSIM: $0.98 \pm 0.005$), all models showed minimal improvement ($<0.4\%$ SSIM), indicating a performance ceiling. Critically, $M_{12}^{-+}$ (no qMRI input) degraded T1 performance below baseline ($-1.5\%$), demonstrating that LR qMRI input is essential for quantitative accuracy.
+
+\added{results related to  absolute quantitative accuracy\footnote{\textcolor{blue}{Added in response to R3.2.}} }
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{figure}[!h]
+    \centering
+    \includegraphics[width=\columnwidth]{samad3.png}
+    \caption{Quantitative SR evaluation across 17 test subjects. SSIM (left) and HFEN (right) for PD, T1, and T2 maps. Each point on y-axis represents per-subject metrics averaged over brain-masked axial slices. Red bar: baseline $Q_l$; blue bars: SWIG qMRI SR models.\added{This figure should be completed so it includes other metrics and 2 new other models}}
+    \label{fig:boxplots}
+\end{figure}
+
+
+\begin{figure*}[!h]
+   \centering
+   \includegraphics[width=\textwidth]{samad4.png}
+    \caption{(a) Model $M_{12}^{++}$ applied to MuPa-ZTE data. Rows: PD, T1, T2 maps. Columns per protocol (Acq1, Acq5, Acq5$^{\text{R}}$): input $Q_l$, SR output $\hat{Q}_h$. (b) Acquired guides (left) and synthesized images from $Q_l$ and $\hat{Q}_h$ using forward models with acquisition-matched parameters of acquired guides. (c) T2-FLAIR synthesized from $Q_l$ and $\hat{Q}_h$ (never used as guide) versus acquired reference. Metrics in B and C computed for shown slice.}
+   \label{fig:slice_acquired_data}
+\end{figure*}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{table*}[!h]
+\centering
+\renewcommand{\arraystretch}{1.2}
+\setlength{\tabcolsep}{5pt}
+\caption{Quantitative evaluation of wMRI synthesized from ${Q}_l$ and $\hat{Q}_h$ versus acquired clinical references. Metrics averaged over axial slices 40–140,  mean±std. SSIM: higher is better (max=1.0); HFEN: lower is better. Bold indicates superior performance.}
+\begin{tabularx}{\textwidth}{|l|l|*{4}{>{\centering\arraybackslash}X|}}
+\hline
+\multirow{3}{*}{\shortstack{\textbf{Acquisition}\\\textbf{Protocol}}} & 
+\multirow{3}{*}{\textbf{Contrast}} & 
+\multicolumn{4}{c|}{\textbf{Image Quality Metrics}} \\ \cline{3-6}
+& & \multicolumn{2}{c|}{\textbf{SSIM ($\uparrow$)}} & \multicolumn{2}{c|}{\textbf{HFEN ($\downarrow$)}} \\ \cline{3-6}
+& & \textbf{From $Q_l$} & \textbf{From $\hat{Q}_h$} & \textbf{From $Q_l$} & \textbf{from $\hat{Q}_h$} \\ \hline
+\multirow{3}{*}{\shortstack{Acq1}} 
+& T1w       & 0.83±0.04 & \textbf{0.94±0.02} & 0.72±0.07 & \textbf{0.32±0.04} \\ \cline{2-6}
+& T2w       & 0.79±0.07 & \textbf{0.88±0.09} & 0.83±0.08 & \textbf{0.25±0.04} \\ \cline{2-6}
+& T2-FLAIR  & 0.71±0.08 & \textbf{0.74±0.08} & 1.17±0.06 & \textbf{1.13±0.12} \\ \hline
+\multirow{3}{*}{\shortstack{Acq5}} 
+& T1w       & 0.84±0.04 & \textbf{0.94±0.02} & 0.71±0.08 & \textbf{0.32±0.04} \\ \cline{2-6}
+& T2w       & 0.75±0.08 & \textbf{0.88±0.09} & 1.04±0.06 & \textbf{0.25±0.04} \\ \cline{2-6}
+& T2-FLAIR  & 0.69±0.09 & \textbf{0.74±0.08} & 1.34±0.05 & \textbf{1.10±0.12} \\ \hline
+\multirow{3}{*}{\shortstack{Acq5$^{\text{R}}$}} 
+& T1w       & 0.87±0.03 & \textbf{0.94±0.02} & 0.66±0.07 & \textbf{0.46±0.08} \\ \cline{2-6}
+& T2w       & 0.63±0.12 & \textbf{0.85±0.10} & 1.38±0.11 & \textbf{0.35±0.06} \\ \cline{2-6}
+& T2-FLAIR  & 0.70±0.09 & \textbf{0.75±0.07} & 1.54±0.14 & \textbf{1.24±0.08} \\ \hline
+\end{tabularx}
+\label{tab:metrics_inference}
+\end{table*}
+
+
+\textbf{Model Selection:}
+Table~\ref{tab:improvement} gives the mean percentage improvements in metric values across all subjects. Ranking models by performance on each metric-map combination (lower rank = better), $M_{12}^{++}$ achieved the lowest total rank score (9) and hence, was selected for further validation.
+
+
+\begin{table*}[!h]
+\centering
+\caption{Ablation study performance: percentage improvement over 
+$Q_l$ baseline for each model and parametric map (averaged across 17 
+test subjects). \added{$M_{12}^{++,\text{U}}$ denotes the U-Net variant 
+of $M_{12}^{++}$ trained under identical conditions. $M^{s}$ denotes 
+the fully supervised upper bound.} Total rank computed by summing 
+individual ranks across all metrics and maps (lower is better).}
+\label{tab:improvement}
+\newcolumntype{Y}{>{\centering\arraybackslash}X}
+\begin{tabularx}{\textwidth}{%
+  >{\hsize=0.8\hsize}Y  % Metric
+  >{\hsize=0.8\hsize}Y  % Map
+  >{\hsize=0.8\hsize}Y  % M1++
+  >{\hsize=0.8\hsize}Y  % M2++
+  >{\hsize=0.8\hsize}Y  % M12++
+  >{\hsize=0.8\hsize}Y  % M12-+
+  >{\hsize=0.8\hsize}Y  % M12++U
+  >{\hsize=0.8\hsize}Y  % Ms
+}
+\toprule
+\textbf{Metric} & \textbf{Map} & 
+$\mathbf{M_{1}^{++}}$ & 
+$\mathbf{M_{2}^{++}}$ & 
+$\mathbf{M_{12}^{++}}$ & 
+$\mathbf{M_{12}^{-+}}$ & 
+\added{$\mathbf{M_{12}^{++,\text{U}}}$} &
+\added{$\mathbf{M^{s}}$} \\
+& & (\%) & (\%) & (\%) & (\%) & \added{(\%)} & \added{(\%)} \\
+\midrule
+\multirow{3}{*}{SSIM} 
+  & PD & +2.62 & +1.41 & +4.32 & +0.23 & \added{[X]} & \added{[X]} \\
+  & T1 & +1.78 & +1.25 & +3.17 & -1.48 & \added{[X]} & \added{[X]} \\
+  & T2 & +0.22 & +0.36 & +0.27 & -0.61 & \added{[X]} & \added{[X]} \\
+\midrule
+\multirow{3}{*}{HFEN} 
+  & PD & -28.66 & -35.34 & -55.06 & -40.91 & \added{[X]} & \added{[X]} \\
+  & T1 & -30.25 & -18.85 & -52.38 & -38.75 & \added{[X]} & \added{[X]} \\
+  & T2 & -3.21  & -8.41  & -7.49  & -4.03  & \added{[X]} & \added{[X]} \\
+\midrule
+\added{\multirow{3}{*}{MAE}} 
+  & \added{PD} & \added{[X]} & \added{[X]} & \added{[X]} & \added{[X]} & \added{[X]} & \added{[X]} \\
+  & \added{T1} & \added{[X]} & \added{[X]} & \added{[X]} & \added{[X]} & \added{[X]} & \added{[X]} \\
+  & \added{T2} & \added{[X]} & \added{[X]} & \added{[X]} & \added{[X]} & \added{[X]} & \added{[X]} \\
+\midrule
+\multirow{1}{*}{Total Rank} 
+  & & 17 & 15 & 9 & 19 & \added{[X]} & \added{[X]} \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\added{\textbf{Sensitivity Analysis \footnote{\textcolor{blue}{Added in response to R1.5 and R2.5}} of Loss Weighting Parameter $\alpha$ :} The results of sensitivity analyis on alpha goes here}
+
+
+
+\added{\textbf{Architectural Comparison\footnote{\textcolor{blue}{Added in response to R2.6.}} --- ResNet vs.\ U-Net:} The results go here... }
+
+\subsection{Evaluation on \deleted{In-vivo Data}\added{Acquired Data}}
+
+
+\added{\textbf{quantitative evaluation with phantom data \footnote{\textcolor{blue}{Added in response to R3.2.a 3.2.c }}} The results go here... }
+
+
+
+\textbf{Qualitative qMRI SR Assessment:}
+Figure~\ref{fig:slice_acquired_data}a shows SR outputs for the three MuPa-ZTE protocols: fast (Acq1, 1-minute), standard (Acq5, 5-minute), and ReconDL-enhanced (Acq5$^{\text{R}}$, supervised CNN reconstruction). Visual assessment confirms consistent enhancement across all protocols: improved edge definition and reduced noise for Acq1 and Acq5 inputs, with SR outputs approaching Acq5$^{\text{R}}$ reference quality. Notably, when Acq5$^{\text{R}}$ serves as input—already enhanced by ReconDL—SWIG qMRI SR still produces subtle refinements in the SR outputs.
+
+
+
+
+
+
+\textbf{Evaluation via wMRI Synthesis:}
+Figure~\ref{fig:slice_acquired_data}b presents T1w and T2w images synthesized from $Q_l$ and $\hat{Q}_h$ using forward models \ref{IR-GRE}, \ref{PROPELLER} with acquisition-matched parameters. Synthesized images from $\hat{Q}_h$ demonstrate superior fidelity to acquired in-vivo references across all protocols, confirming effective clinical data performance. Notably, wMRI synthesized from SR-enhanced Acq1 and Acq5 inputs show reduced blurring, sharper anatomical delineation, and lower noise compared to synthesis from Acq5$^{\text{R}}$.
+
+Figure~\ref{fig:slice_acquired_data}c evaluates T2-FLAIR synthesis—a contrast never seen by the SR model. T2-FLAIR images synthesized from Acq1 and Acq5 exhibit substantial noise, partial volume artifacts, and poor fluid suppression. In contrast, T2-FLAIR from SR-enhanced qMRI shows marked improvements for these protocols. Critically, when Acq5$^{\text{R}}$ serves as input, T2-FLAIR synthesis from this protocol achieves adequate ventricular suppression but fails in narrow cortical sulci (indicated by red arrows), producing bright artifacts. T2-FLAIR synthesized from SR-enhanced Acq5$^{\text{R}}$ demonstrates superior sulcal suppression, indicating improved quantification in these challenging narrow CSF spaces where partial volume effects dominate. Despite these improvements, residual hyperintense artifacts remain visible at gray matter-CSF interfaces, reflecting inherent limitations in resolving sub-voxel CSF partial volumes.
+
+Table~\ref{tab:metrics_inference} presents quantitative metrics averaged over 100 central axial slices (40--140). Synthesized wMRI from $\hat{Q}_h$ consistently outperforms those from $Q_l$ across all protocols and contrasts. For guides (T1w, T2w), improvements are most pronounced for Acq1 and Acq5 inputs: T1w SSIM increased by 13.3\% (Acq1) and 11.9\% (Acq5) versus 8.0\% (Acq5$^{\text{R}}$), while HFEN decreased by 55.6\% (Acq1) and 54.9\% (Acq5) versus 30.3\% (Acq5$^{\text{R}}$). This pattern reflects the lower baseline quality of Acq1 and Acq5 inputs, providing greater opportunity for SR enhancement compared to the already-refined Acq5$^{\text{R}}$ maps. For T2-FLAIR—never used as guidance—SR still improved synthesis quality across all protocols (SSIM: +4.2\% for Acq1, +7.2\% for Acq5, +7.1\% for Acq5$^{\text{R}}$; HFEN: -3.4\% to -19.5\%), demonstrating that quantitative improvements in $\hat{Q}_h$ translate to enhanced synthesis of unseen contrasts.
+
+
+
+\section{Discussion}
+\subsection{ Principal Findings}
+Physics-informed, self-supervised learning achieved effective qMRI SR using routinely acquired clinical weighted images without requiring HR qMRI for training. Ablation studies established: (1) contrast-specific enhancement (T1w was observed to mostly improve T1 maps, and T2w improves T2 maps); (2) dual-guide configuration optimally enhances all parameters; (3) LR qMRI input is essential for quantitative accuracy. Validation on independently acquired MuPa-ZTE data confirmed: (4) cross-sequence generalizability (5) improved synthesis of a contrast never used during training (T2-FLAIR), demonstrating recovery of true quantitative tissue properties \added{and translating to measurable gains in diagnostic contrast synthesis --- a key factor in 
+clinical qMRI adoption, as clinicians rely predominantly on conventional 
+weighted images for diagnosis \footnote{\textcolor{blue}{Added in response to R3.5.}}}.
+
+
+\subsection{Contrast-Specific Enhancement and LR qMRI Necessity}
+T1w images provide strong spatial information about T1 distribution but weak T2 information, and vice versa for T2w images. Model $M_{12}^{-+}$, which excluded $Q_l$ at inference, exhibited quantitative errors—reasonable white matter T1 recovery but failed gray matter quantification. This demonstrates wMRI alone cannot reliably recover absolute quantitative values in all regions. \added{Without $Q_l$, the network lacks a 
+subject-specific quantitative anchor and must infer absolute tissue 
+values solely from HR wMRI guides, which can produce structurally 
+plausible but quantitatively inaccurate predictions (e.g., gray matter 
+T1 errors in $M_{12}^{-+}$). Including $Q_l$ reframes the task as 
+super-resolution of an existing quantitative measurement rather than 
+inferring absolute values from structure alone. The data consistency 
+term $L_l$ reinforces this anchor by ensuring that the predicted HR 
+qMRI maps, when passed through the forward signal model and downsampled, 
+reproduce the acquired LR contrast. Systematic 
+biases in T1, T2, or PD directly increase $L_l$, whereas the guide 
+loss $L_h$ only constrains correlation structure, not absolute values. 
+Together, $Q_l$ and $L_l$ provide complementary mechanisms: the input 
+establishes the quantitative reference, and $L_l$ enforces consistency 
+with it during training. \footnote{\textcolor{blue}{Added in response to R1.6.}}}
+\added{Furthermore, model $M_{12}^{--}$, which removes $Q_l$ during 
+both training and inference, produces quantitatively meaningless maps 
+across all regions. This demonstrates that direct wMRI-to-qMRI mapping 
+fails when only two weighted images are available --- a realistic 
+constraint in clinical settings. While additional wMRI inputs could 
+in principle make the problem more tractable, the results highlight 
+the fundamental limitation of physics-informed self-supervised training 
+without a quantitative anchor. Together, $M_{12}^{-+}$ and 
+$M_{12}^{--}$ provide concrete evidence that LR qMRI is essential 
+during both training and inference.\footnote{\textcolor{blue}{Added in response to R4.2.}}}
+
+This highlights SR's fundamental advantage over direct qMRI estimation from wMRI~\cite{b5,b6,b7}: SR preserves acquired measurements as validation reference. Methods estimating qMRI directly from wMRI produce outputs that cannot be validated against any acquired quantitative data. The data consistency term $L_l$ enforces agreement between downsampled SR outputs and acquired LR contrasts, preventing quantitatively implausible maps.
+
+
+\subsection{\added{Architectural Choice and Framework Generalizability}}
+\added{The primary contribution of this work is the physics-informed self-supervised optimization framework rather than the choice of network architecture. Our framework defines how quantitative accuracy is enforced and how routine clinical wMRI guides the SR process through the loss formulation independent of the backbone used to parameterize the mapping. This is confirmed empirically by the near-equivalent performance of ResNet and U-Net backbones under 
+identical training conditions (Section~\ref{Ablation Study: Individual Component Contributions}). More expressive contemporary architectures, such as Transformer-based models~\cite{.....} and diffusion models~\cite{......}, could in principle be integrated within 
+this framework and represent a natural direction for future work.}
+
+\subsection{Cross-Sequence Generalizability}
+SWIG qMRI SR, trained on 2D QRAPMASTER, successfully enhanced 3D MuPa-ZTE maps despite fundamental differences: $k$-space sampling trajectory (Cartesian vs. radial), acquisition timings, dimensionality, and reconstruction algorithms. SR outputs from 1-minute Acq1 exceeded 5-minute Acq5 quality (Fig.~\ref{fig:slice_acquired_data}a, Table~\ref{tab:metrics_inference}).
+
+This generalizability arises from operating on relaxometry parameters—intrinsic tissue properties independent of acquisition protocol—rather than sequence-dependent signal intensities. Methods operating on $k$-space~\cite{b3} or raw wMRI intensities must learn sequence-specific relationships requiring retraining for different protocols.
+
+The clinical implications of the cross-sequence generelizability of the implementation are significant. SWIG qMRI SR enables train-once, deploy-across-sequences workflow: the key requirement is matching guide protocols (clinically standardized T1w IR-SPGR, T2w SE), while qMRI sequences can vary. Nevertheless, validation on each target sequence remains essential. This work validates one sequence (MuPa-ZTE) in one subject; Further validation across additional sequences (MP2RAGE~\cite{b26}, DESPOT~\cite{b27}, MR fingerprinting~\cite{b16}) and pathological populations is needed.
+
+\subsection{Enhancement Beyond Supervised DL Reconstruction}
+SWIG qMRI SR achieved remarkable improvements when applied to Acq1 and Acq5 inputs, with SR-enhanced outputs surpassing even Acq5$^{\text{R}}$ maps. This superiority is evident both in visual inspection (Fig.~\ref{fig:slice_acquired_data}a) and quantitative metrics for synthesized images (Table~\ref{tab:metrics_inference}). Specifically, wMRI synthesized from SR-enhanced Acq1 and Acq5 maps consistently outperformed wMRI synthesized from Acq5$^{\text{R}}$ across all three contrasts (T1w, T2w, T2-FLAIR), demonstrating that SWIG qMRI SR recovers quantitative information beyond what supervised reconstruction (ReconDL) alone achieves.
+
+This indicates complementary information sources: ReconDL learns spatial priors from training data, while SWIG qMRI SR leverages structural information from independently acquired clinical wMRI. Such supervised reconstruction cannot access information in wMRI beyond its training data, particularly valuable for abnormalities never seen by supervised networks.
+
+
+\subsection{Unseen T2-FLAIR Synthesis Validates Quantitative Enhancement}
+T2-FLAIR synthesis—never used as a guide—provides compelling evidence of true quantitative recovery rather than feature copying. Synthesis from super-resolved maps outperformed LR inputs across all protocols. The successful synthesis of T2-FLAIR, which requires different parameter combinations than the guide contrasts, confirms that SR genuinely improved quantitative tissue characterization rather than merely copying structural features from guides.
+
+For Acq5$^{\text{R}}$, T2-FLAIR  synthesis showed adequate ventricular suppression but failed in narrow cortical sulci, producing bright artifacts. T2-FLAIR from $\hat{Q}_h$ achieved superior sulcal suppression, indicating improved quantification in narrow CSF spaces where partial volume effects dominate.  Despite improvements, residual artifacts remained visible at gray matter-CSF interfaces.
+
+\added{Beyond confirming quantitative accuracy of the underlying super-resolved maps, these synthesis results carry direct clinical relevance: since clinicians rely predominantly on conventional weighted images for diagnosis, the ability to synthesize higher-fidelity diagnostic contrasts---including T2-FLAIR, among the most diagnostically sensitive contrasts in neuroimaging---from a 1-minute qMRI acquisition represents a practical benefit of HR qMRI in routine workflows.\footnote{\textcolor{blue}{Added in response to R3.5.}}}
+
+
+\subsection{Limitations of the Current Work}
+
+\textbf{Training and Validation on pathological cases:} \deleted{In this work, training used synthetic data from healthy volunteers and validation on in-vivo data used one healthy volunteer, yet the primary motivation is training with qMRI from patient populations. Moreover, pathological tissues may violate mono-exponential relaxation assumptions (e.g., tumors with mixed compartments), potentially causing systematic errors.}
+\added{In this work, training was performed using synthetic data derived 
+from volunteers, and in-vivo validation was limited to volunteers. This 
+setup is sufficient as proof-of-concept of the proposed framework under 
+controlled conditions. With the concept validated, future work can train 
+the method on patient datasets that include pathological variability. 
+When validating that trained model, it is relevant to evaluate potential 
+deviations from the mono-exponential signal models employed, for 
+example in edema, necrosis, or multi-compartment effects.}\footnote{\textcolor{blue}{Added in response to R1.1, R2.2, R3.1, R4.3}}
+
+
+\textbf{Quantitative Accuracy:} \deleted{This work lacks direct validation of absolute quantitative accuracy. Phantom validation (e.g., ISMRM/NIST phantom) is essential to establish: (1) whether SR preserves quantitative accuracy, (2) accuracy dependence on input quality, and (3) accuracy across physiological relaxation time ranges.} \footnote{\textcolor{red}{Removed as it is now addressed in response to R1.2.}}
+
+
+\textbf{Signal Model Simplifications:} \added{The framework relies on two physical models. The first simulates LR qMRI from the SR qMRI and enforces quantitative accuracy with respect to these maps.} The forward models employed use simplified signal equations that neglect effects such as variable flip angle refocusing in fast spin-echo sequences~\cite{b29}, slice profile imperfections, and B1 inhomogeneities \added{; effects not captured in these maps will influence the resolved HR qMRI, but addressing these is beyond the scope of the current work}. More sophisticated approaches, such as Extended Phase Graph (EPG) formalism~\cite{b30}, could provide more realistic signal modeling in multi-echo sequences. \added{The second model relates the resolved HR qMRI to the weighted images. To account for expected minor mismatches, including global scaling, we use a correlation loss during training.} \deleted{Additionally, differences in bias field correction methods (e.g., PURE%~\cite{b31}
+on/off) between training and inference data can introduce intensity inconsistencies that propagate through the physics-based loss functions, potentially degrading SR performance.} \added{Future experiments should confirm that small modeling errors, such as ignoring B1$^+$ variation, have negligible impact on quantitative accuracy. We expect that slice-profile effects and other point spread function imperfections may affect the final resolution.}
+
+\textbf{Acceleration Factor and LR qMRI Quality:} \added{The current 
+work evaluates a single acceleration level: Acq1 corresponds to 
+approximately 5-fold acceleration relative to the full-duration 
+protocol. The ablation experiments partially characterize the 
+sensitivity to LR qMRI - $M_{12}^{--}$ and $M_{12}^{-+}$ 
+represent the extreme case of no quantitative anchor, confirming that 
+its absence degrades performance, while $M_{12}^{++}$ demonstrates 
+that LR qMRI provides a sufficient anchor. However, 
+the intermediate regime where LR qMRI is present but of 
+progressively lower quality due to increased acceleration has not 
+been systematically evaluated. Determining the lower bound on usable 
+acceleration, below which the LR qMRI anchor becomes insufficient to 
+reliably guide SR, remains an open question that depends on 
+sequence-specific SNR characteristics and the structural detail 
+available in the selected wMRI guides.\footnote{\textcolor{blue}{Added in response to R3.2.b and 4.5.}}}
+
+
+\added{Additional open questions include cross-field-strength 
+generalizability---as deployment at a different field strength requires 
+dedicated evaluation---and robustness to motion artifacts\footnote{\textcolor{blue}{Added in response to R4.5.5}}. The synthetic training pipeline uses artifact-free data and the framework 
+has no explicit mechanism for handling motion corruption. In the 
+in-vivo validation, rigid-body registration was applied to align 
+acquired qMRI and guide images, mitigating gross misalignment, but 
+intra-acquisition motion and motion-induced artifacts in the qMRI 
+maps themselves were not addressed. As with any learning-based 
+framework, incorporating motion-corrected acquisitions will be 
+essential for robust clinical deployment\footnote{\textcolor{blue}{Added in response to R4.5.6 }} . Moreover \footnote{\textcolor{blue}{Added in response to R1.5 and R2.5. }} sequence- or tissue-specific tuning of weighting factors of loss function, for instance in acquisitions with substantially different SNR regimes — remains an open direction}
+
+
+
+\subsection{Outlook}
+The present work demonstrates a practical step towards integrating rapid qMRI into routine protocols. By adding a rapid qMRI acquisition and combining it with existing clinical wMRI scans, we showed it is possible to do qMRI SR. This highlights a compelling use-case: a standard MRI exam could include a brief qMRI sequence (e.g., 1 minute MuPa-ZTE) and leverage the standard images to obtain HR qMRI post hoc. The overall scan time overhead is minimal, yet the benefits are significant—both in terms of richer quantitative information and the ability to derive missing image contrasts on demand.
+
+
+\section{Conclusion}
+
+We introduced SWIG qMRI SR, a physics-informed, self-supervised DL framework for qMRI SR by leveraging conventional clinical wMRIs. Our approach avoids the need for HR qMRI during training, instead relying on the physical relationship between qMRI and wMRI to guide learning. Through extensive experiments on both synthetic and acquired data, we demonstrated that SWIG qMRI SR enhances the resolution and fidelity of qMRI, while also enabling the synthesis of realistic wMRI. The framework generalized well to independently acquired data, indicating robustness to a different qMRI pulse sequence. Furthermore, the ability to synthesize missing MRI contrasts from the SR outputs supports integration of SWIG qMRI SR into fast qMRI workflows, potentially reducing overall scan time and improving clinical applicability. Overall, SWIG qMRI SR represents a promising approach to making  qMRI more accessible and compatible with routine clinical practice.
+
+
+\begin{thebibliography}{00}
+
+\bibitem{b1} M. T. Cashmore, A. J. McCann, S. J. Wastling, C. McGrath, J. Thornton, and M. G. Hall, ``Clinical quantitative MRI and the need for metrology,'' \emph{Brit. J. Radiol.}, vol. 94, no. 1120, Art. no. 20201215, 2021, doi: 10.1259/bjr.20201215.
+
+\bibitem{b2} K. P. Whittall and A. L. MacKay, ``Quantitative interpretation of NMR relaxation data,'' \emph{J. Magn. Reson.}, vol. 84, no. 1, pp. 134--152, 1989, doi: 10.1016/0022-2364(89)90011-5.
+
+\bibitem{b3} F. Liu, L. Feng, and R. Kijowski, ``MANTIS: Model-augmented neural network with incoherent $k$-space sampling for efficient MR parameter mapping,'' \emph{Magn. Reson. Med.}, vol. 82, no. 1, pp. 174--188, Jul. 2019, doi: 10.1002/mrm.27707.
+
+\bibitem{b4} A. S. Chaudhari \emph{et al.}, ``Super-resolution musculoskeletal MRI using deep learning,'' \emph{Magn. Reson. Med.}, vol. 80, no. 5, pp. 2139--2154, Nov. 2018, doi: 10.1002/mrm.27178.
+
+\bibitem{b5} S. Qiu, A. G. Christodoulou, Y. Xie, and D. Li, ``Hybrid supervised and self-supervised deep learning for quantitative mapping from weighted images using LR labels,'' in \emph{Proc. Int. Soc. Magn. Reson. Med.}, London, U.K., 2022, p. 2609.
+
+\bibitem{b6} S. Qiu \emph{et al.}, ``Multiparametric mapping in the brain from conventional contrast-weighted images using deep learning,'' \emph{Magn. Reson. Med.}, vol. 87, no. 1, pp. 488--495, Jan. 2022, doi: 10.1002/mrm.28962.
+
+\bibitem{b7} E. Moya-Sáez, Ó. Peña-Nogales, R. de Luis-García, and C. Alberola-López, ``A deep learning approach for synthetic MRI based on two routine sequences and training with synthetic data,'' \emph{Comput. Methods Programs Biomed.}, vol. 210, Art. no. 106371, Nov. 2021, doi: 10.1016/j.cmpb.2021.106371.
+
+\bibitem{b8} A. Atalık, S. Chopra, and D. K. Sodickson, ``A trust-guided approach to MR image reconstruction with side information,'' \emph{IEEE Trans. Med. Imaging}, vol. PP, 2025, doi: 10.1109/TMI.2025.3594363.
+
+\bibitem{b9} A. Roche, G. Malandain, and N. Ayache, ``Unifying maximum likelihood approaches in medical image registration,'' \emph{Int. J. Imag. Syst. Technol.}, vol. 11, no. 1, pp. 71--80, 2000, doi: 10.1002/(SICI)1098-1098(2000)11:1<71::AID-IMA8>3.0.CO;2-5.
+
+\bibitem{b10} J. B. M. Warntjes, O. D. Leinhard, J. West, and P. Lundberg, ``Rapid magnetic resonance quantification on the brain: Optimization for clinical usage,'' \emph{Magn. Reson. Med.}, vol. 60, no. 2, pp. 320--329, Aug. 2008, doi: 10.1002/mrm.21635.
+
+\bibitem{b11} L. N. Tanenbaum \emph{et al.}, ``Synthetic MRI for clinical neuroimaging: Results of the magnetic resonance image compilation (MAGiC) prospective, multicenter, multireader trial,'' \emph{Amer. J. Neuroradiol.}, vol. 38, no. 6, pp. 1103--1110, Jun. 2017, doi: 10.3174/ajnr.A5227.
+
+\bibitem{b12} F. Isensee \emph{et al.}, ``Automated brain extraction of multi-sequence MRI using artificial neural networks,'' \emph{Hum. Brain Mapp.}, vol. 40, no. 17, pp. 5065--5077, Dec. 2019, doi: 10.1002/hbm.24750.
+
+\bibitem{b13} F. Wiesinger, G. McKinnon, and S. Kaushik, ``3D silent parameter mapping: Further refinements \& quantitative assessment,'' in \emph{Proc. Int. Soc. Magn. Reson. Med.}, Virtual, 2021, p. 1828.
+
+\bibitem{b14} E. Ljungberg, T. C. Wood, A. B. Solana, G. J. Barker, and F. Wiesinger, ``Silent motion-corrected ZTE for quantitative T1 and T2 mapping,'' in \emph{Proc. Int. Soc. Magn. Reson. Med.}, London, U.K., 2022, p. 3287.
+
+\bibitem{b15} J. G. Pipe and P. Menon, ``Sampling density compensation in MRI: Rationale and an iterative numerical solution,'' \emph{Magn. Reson. Med.}, vol. 41, no. 1, pp. 179--186, Jan. 1999, doi: 10.1002/(SICI)1522-2594(199901)41:1<179::AID-MRM25>3.0.CO;2-V.
+
+\bibitem{b16} D. Ma \emph{et al.}, ``Magnetic resonance fingerprinting,'' \emph{Nature}, vol. 495, no. 7440, pp. 187--192, Mar. 2013, doi: 10.1038/nature11971.
+
+\bibitem{b17} F. Wiesinger \emph{et al.}, ``PSST...Parameter mapping Swift and SilenT,'' in \emph{Proc. Int. Soc. Magn. Reson. Med.}, Virtual, 2020, p. 0882.
+
+\bibitem{b18} S. Mandava, M. Carl, F. Wiesinger, M. Fung, and R. M. Lebel, ``Deep learning-based chemical shift artifact reduction in zero echo time (ZTE) MRI,'' in \emph{Proc. Int. Soc. Magn. Reson. Med.}, Singapore, 2024, p. 4428.
+
+\bibitem{b19} R. M. Lebel, ``Performance characterization of a novel deep learning-based MR image reconstruction pipeline,'' GE Healthcare, Calgary, AB, Canada, White Paper, 2020.
+
+\bibitem{b20} T. Boucneau \emph{et al.}, ``AZTEK: Adaptive zero TE $k$-space trajectories,'' \emph{Magn. Reson. Med.}, vol. 85, no. 2, pp. 926--935, Feb. 2021, doi: 10.1002/mrm.28491.
+
+\bibitem{b21} S. Klein, M. Staring, K. Murphy, M. A. Viergever, and J. P. W. Pluim, ``elastix: A toolbox for intensity-based medical image registration,'' \emph{IEEE Trans. Med. Imag.}, vol. 29, no. 1, pp. 196--205, Jan. 2010, doi: 10.1109/TMI.2009.2035616.
+
+\bibitem{b22} D. P. Shamonin, E. E. Bron, B. P. F. Lelieveldt, M. Smits, S. Klein, and M. Staring, ``Fast parallel image registration on CPU and GPU for diagnostic classification of Alzheimer's disease,'' \emph{Front. Neuroinform.}, vol. 7, Art. no. 50, Jan. 2014, doi: 10.3389/fninf.2013.00050.
+
+\bibitem{b23} K. He, X. Zhang, S. Ren, and J. Sun, ``Deep residual learning for image recognition,'' in \emph{Proc. IEEE Conf. Comput. Vis. Pattern Recognit.}, Las Vegas, NV, USA, 2016, pp. 770--778, doi: 10.1109/CVPR.2016.90.
+
+\bibitem{b24} Z. Wang, A. C. Bovik, H. R. Sheikh, and E. P. Simoncelli, ``Image quality assessment: From error visibility to structural similarity,'' \emph{IEEE Trans. Image Process.}, vol. 13, no. 4, pp. 600--612, Apr. 2004, doi: 10.1109/TIP.2003.819861.
+
+\bibitem{b25} S. Ravishankar and Y. Bresler, ``MR image reconstruction from highly undersampled $k$-space data by dictionary learning,'' \emph{IEEE Trans. Med. Imag.}, vol. 30, no. 5, pp. 1028--1041, May 2011, doi: 10.1109/TMI.2010.2090538.
+
+\bibitem{b26} J. P. Marques \emph{et al.}, ``MP2RAGE, a self bias-field corrected sequence for improved segmentation and T1-mapping at high field,'' \emph{NeuroImage}, vol. 49, no. 2, pp. 1271--1281, Jan. 2010, doi: 10.1016/j.neuroimage.2009.10.002.
+
+\bibitem{b27} S. C. Deoni, B. K. Rutt, and T. M. Peters, ``Rapid combined T1 and T2 mapping using gradient recalled acquisition in the steady state,'' \emph{Magn. Reson. Med.}, vol. 49, no. 3, pp. 515--526, Mar. 2003, doi: 10.1002/mrm.10407.
+
+\bibitem{b28} S. Russek, M. Boss, E. Jackson, D. Jennings, J. Evelhoch, Z. Gunter, and H. Schmitt, ``Characterization of NIST/ISMRM MRI system phantom,'' in \emph{Proc. Int. Soc. Magn. Reson. Med.}, Melbourne, Australia, 2012, p. 2456.
+
+\bibitem{b29} R. F. Busse, H. Hariharan, A. Vu, and J. H. Brittain, ``Fast spin echo sequences with very long echo trains: Design of variable refocusing flip angle schedules and generation of clinical T2 contrast,'' \emph{Magn. Reson. Med.}, vol. 55, no. 5, pp. 1030--1037, May 2006, doi: 10.1002/mrm.20863.
+
+\bibitem{b30} M. Weigel, ``Extended phase graphs: Dephasing, RF pulses, and echoes---Pure and simple,'' \emph{J. Magn. Reson. Imag.}, vol. 41, no. 2, pp. 266--295, Feb. 2015, doi: 10.1002/jmri.24619.
+
+\bibitem{b31} B. Belaroussi, J. Milles, S. Carme, Y. M. Zhu, and H. Benoit-Cattin, ``Intensity non-uniformity correction in MRI: Existing methods and their validation,'' \emph{Med. Image Anal.}, vol. 10, no. 2, pp. 234--246, Apr. 2006, doi: 10.1016/j.media.2005.09.004.
+
+\end{thebibliography}
+
+\end{document}
+
